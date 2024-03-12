@@ -1,4 +1,5 @@
 ﻿
+
 using Microsoft.IdentityModel.Tokens;
 using mssql_listener;
 
@@ -19,6 +20,7 @@ foreach (var section in iniData)
 }
 */
 
+Console.WriteLine(iniData.ContainsKey(Mssql) && iniData.ContainsKey(Mysql));
 
 if (iniData.ContainsKey(Mssql) && iniData.ContainsKey(Mysql))
 {
@@ -56,9 +58,9 @@ if (iniData.ContainsKey(Mssql) && iniData.ContainsKey(Mysql))
         if (iniData.ContainsKey("General"))
         {
             var general = iniData["General"];
-            if (general.ContainsKey("Tables") && !general["Tables"].IsNullOrEmpty())
+            if (general.ContainsKey("tables") && !general["tables"].IsNullOrEmpty())
             {
-                notifier.StartListening(general["Tables"].Split(','));
+                notifier.StartListening(general["tables"].Split(','));
             }
             else
             {
