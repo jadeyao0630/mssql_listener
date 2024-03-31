@@ -23,66 +23,74 @@ class Program
             }
         }
         var parser = new IniFileParser();
-        var iniData = parser.Parse("config.ini");
-        var Mssql = "MsSqlServer";
-        var MssqlTarget = "MsSqlServerTarget";
-
-
-        if (iniData.ContainsKey(Mssql) && iniData.ContainsKey(MssqlTarget))
+        try
         {
-            var server = iniData[Mssql];
-            var server_target = iniData[MssqlTarget];
-            if (server != null &&
-                server.ContainsKey("Server") &&
-                server.ContainsKey("Database") &&
-                server.ContainsKey("User") &&
-                server.ContainsKey("Password") &&
-                server_target != null &&
-                server_target.ContainsKey("Server") &&
-                server_target.ContainsKey("User") &&
-                server_target.ContainsKey("Password"))
+            var iniData = parser.Parse("config.ini");
+            var Mssql = "MsSqlServer";
+            var MssqlTarget = "MsSqlServerTarget";
+
+
+            if (iniData.ContainsKey(Mssql) && iniData.ContainsKey(MssqlTarget))
             {
-                var port = server.ContainsKey("Port") ? server["Port"] : "1433";
-                var port_target = server.ContainsKey("Port") ? server_target["Port"] : "1433";
-                //var data = $"server={server["Server"]},{port};Database={server["Database"]};User Id={server["User"]};Password={server["Password"]};Trusted_Connection=True";
-                mssqlChangeListerner listener = new mssqlChangeListerner(
-                    new database
-                    {
-                        server = server["Server"],
-                        port = int.Parse(port),
-                        databaseName = server["Database"],
-                        user = server["User"],
-                        password = server["Password"],
-                        isTrusted = server.ContainsKey("isTrusted") && server["isTrusted"] == "1",
-
-                    }, 
-                    new database
-                    {
-                        server = server_target["Server"],
-                        port = int.Parse(port_target),
-                        user = server_target["User"],
-                        password = server_target["Password"],
-                        isTrusted = server_target.ContainsKey("isTrusted") && server_target["isTrusted"] == "1",
-                    }
-                );
-
-                if (iniData.ContainsKey("General"))
+                var server = iniData[Mssql];
+                var server_target = iniData[MssqlTarget];
+                if (server != null &&
+                    server.ContainsKey("Server") &&
+                    server.ContainsKey("Database") &&
+                    server.ContainsKey("User") &&
+                    server.ContainsKey("Password") &&
+                    server_target != null &&
+                    server_target.ContainsKey("Server") &&
+                    server_target.ContainsKey("User") &&
+                    server_target.ContainsKey("Password"))
                 {
-                    var general = iniData["General"];
-                    Console.WriteLine(general.ContainsKey("Tables"));
-                    if (general.ContainsKey("Tables") && !general["Tables"].IsNullOrEmpty())
+                    var port = server.ContainsKey("Port") ? server["Port"] : "1433";
+                    var port_target = server.ContainsKey("Port") ? server_target["Port"] : "1433";
+                    //var data = $"server={server["Server"]},{port};Database={server["Database"]};User Id={server["User"]};Password={server["Password"]};Trusted_Connection=True";
+                    mssqlChangeListerner listener = new mssqlChangeListerner(
+                        new database
+                        {
+                            server = server["Server"],
+                            port = int.Parse(port),
+                            databaseName = server["Database"],
+                            user = server["User"],
+                            password = server["Password"],
+                            isTrusted = server.ContainsKey("isTrusted") && server["isTrusted"] == "1",
+
+                        },
+                        new database
+                        {
+                            server = server_target["Server"],
+                            port = int.Parse(port_target),
+                            user = server_target["User"],
+                            password = server_target["Password"],
+                            isTrusted = server_target.ContainsKey("isTrusted") && server_target["isTrusted"] == "1",
+                        }
+                    );
+
+                    if (iniData.ContainsKey("General"))
                     {
-                        listener.Start(general["Tables"].Split(','), isInit);
-                    }
-                    else
-                    {
-                        Console.WriteLine("tables have not been defineded...");
+                        var general = iniData["General"];
+                        Console.WriteLine(general.ContainsKey("Tables"));
+                        if (general.ContainsKey("Tables") && !general["Tables"].IsNullOrEmpty())
+                        {
+                            listener.Start(general["Tables"].Split(','), isInit);
+                        }
+                        else
+                        {
+                            Console.WriteLine("tables have not been defineded...");
+                        }
+
                     }
 
                 }
-
             }
+        }catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+            return;
         }
+        
     }
     static void ShowHelp()
     {
