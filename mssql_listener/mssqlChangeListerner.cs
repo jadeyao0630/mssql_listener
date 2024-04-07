@@ -121,11 +121,13 @@ namespace mssql_listener
             
             var pks = tableConstructors[tableName]["data"]["pks"] as List<string>;
             //Console.WriteLine(String.Join(",", pks));
+            /*
             if (pks.Count == 0 && pkMatcher.ContainsKey(tableName))
             {
                 pks.Add(pkMatcher[tableName]);
                 setPrimaryKey(tableName, pkMatcher[tableName]);
             }
+            */
             if (pks.Count == 0)
             {
                 Console.WriteLine(tableName+" does not have a primaryKey - "+ string.Join(",", pks));
@@ -450,6 +452,11 @@ namespace mssql_listener
                     };
                     
                 }
+                if (pks.Count == 0 && pkMatcher.ContainsKey(tableName))
+                {
+                    pks.Add(pkMatcher[tableName]);
+                    setPrimaryKey(tableName, pkMatcher[tableName]);
+                }
                 tableConstructors[tableName]["data"] = new Dictionary<string, object> { { "pks", pks } };
             }
             if(pks.Count>0) createTableSql.Append($"PRIMARY KEY ({String.Join(",", pks)})");
@@ -580,7 +587,7 @@ namespace mssql_listener
         // 当数据库表变化时调用的事件
         private void OnDatabaseChange(object sender, SqlNotificationEventArgs e, string tableName)
         {
-            Console.WriteLine("表格{3}变更通知：类型={0}, 信息={1}, 源={2}", e.Type, e.Info, e.Source, tableName);
+            Console.WriteLine(DateTime.Now.ToString("MM-dd HH:mm:ss") +" 表格{3}变更通知：类型={0}, 信息={1}, 源={2}", e.Type, e.Info, e.Source, tableName);
             syncChanged(tableName, getCurrentChangedId(), getLastChangedId(tableName), ListenForChanges(tableName));
 
         }
