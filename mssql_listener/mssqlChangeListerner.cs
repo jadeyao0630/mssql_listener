@@ -1,5 +1,6 @@
 ﻿
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Data;
@@ -34,16 +35,22 @@ namespace mssql_listener
     
     internal class mssqlChangeListerner
     {
-        private Dictionary<string, string> pkMatcher = new Dictionary<string, string>{
-            {"p_Project", "ProjGUID" },
-            {"cb_Product", "ProductGUID" },
-            {"myBusinessUnit", "BUGUID" },
-            {"p_Building", "BldGUID" },
-            {"p_Room", "RoomGUID" },
-            {"s_Contract", "ContractGUID" },
-            {"s_Fee", "FeeGUID" },
-            {"s_Getin", "GetinGUID" },
-            {"s_Order", "OrderGUID" }
+        private Dictionary<string, string[]> pkMatcher = new Dictionary<string, string[]>{
+            {"p_Project", ["ProjGUID"] },
+            {"cb_Product", ["ProductGUID"] },
+            {"myBusinessUnit", ["BUGUID"] },
+            {"p_Building", ["BldGUID"] },
+            {"p_Room", ["RoomGUID"] },
+            {"s_Contract", ["ContractGUID"] },
+            {"cb_Contract", ["ContractGUID"] },
+            {"s_Fee", ["FeeGUID"] },
+            {"s_Getin", ["GetinGUID"] },
+            {"s_Order", ["OrderGUID"] },
+            {"cb_Cost", ["CostGUID"] },
+            {"cb_ContractProj", ["ContractGUID", "ProjGUID"] },
+            {"cb_HTFKApply", ["HTFKApplyGUID"] },
+            {"cb_Pay", ["PayGUID"] },
+            {"cb_HTAlter", ["HTAlterGUID"] },
         };
         private SqlConnection connection;
         private SqlConnection connection_sync;
@@ -61,11 +68,15 @@ namespace mssql_listener
             Console.WriteLine(targetDatabase.getConnectionString());
             target_connection = new SqlConnection(targetDatabase.getConnectionString());
             connection = new SqlConnection(connectionStr);
+            connection_sync = new SqlConnection(connectionStr);
         }
         public void Start(string[] tableNames,bool isInit=false)
         {
             Console.WriteLine("isInit: " + isInit);
             connection.Open();
+
+            connection_sync.Open();
+            /*
             try
             {
                 target_connection.Open();
@@ -98,7 +109,7 @@ namespace mssql_listener
             }
             
             // 确保SqlDependency的启动
-            enableDatabaseBrokker("erp303");
+            enableDatabaseBrokker(database.databaseName);
             SqlDependency.Start(connectionStr);
             var count = 0;
             foreach (var table in tableNames) { 
@@ -110,12 +121,69 @@ namespace mssql_listener
                 count++;
                 Console.WriteLine(table+" is on tracking..."+ count+"/"+ tableNames.Length);
             }
+            */
+            createChangeLogTable();
+            foreach (var table in tableNames)
+            {
+                addTrigger(table);
+            }
             Console.Read();
             connection.Close();
+
+            connection_sync.Close();
             target_connection.Close();
             SqlDependency.Stop(connectionStr);
         }
+        private void addTrigger(string tableName)
+        {
+            var addTriggerQuery = $@"
+CREATE TRIGGER trigger_{tableName}
+ON {tableName}
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    DECLARE @sql NVARCHAR(MAX) = N'';
 
+    -- 构建动态 SQL 语句
+    SET @sql = 'INSERT INTO ChangeLog (Action, ChangeTime) ' +
+               'SELECT CASE WHEN EXISTS (SELECT * FROM inserted) AND NOT EXISTS (SELECT * FROM deleted) THEN ''INSERT'' ' +
+               'WHEN EXISTS (SELECT * FROM deleted) AND NOT EXISTS (SELECT * FROM inserted) THEN ''DELETE'' ' +
+               'ELSE ''UPDATE'' END, GETDATE();'
+
+    -- 执行动态 SQL
+    EXEC sp_executesql @sql;
+END;
+";
+            try
+            {
+                using (SqlCommand command = new SqlCommand(addTriggerQuery, connection))
+                {
+                    Console.WriteLine("ChangeLog created " + command.ExecuteNonQuery());
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("ChangeLog is existed" + e.Message);
+            }
+        }
+        private void createChangeLogTable()
+        {
+            var query = "IF NOT ExISTS( SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[ChangeLog]') AND type in (N'U')) "+
+                "BEGIN " +
+                    "CREATE TABLE ChangeLog (Action VARCHAR(255),DataSnapshot  NVARCHAR(MAX), ChangeTime datetime);" +
+                "END;";
+            try
+            {
+                using (SqlCommand command = new SqlCommand(query, connection))
+                {
+                    Console.WriteLine("ChangeLog created " + command.ExecuteNonQuery());
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("ChangeLog is existed" + e.Message);
+            }
+        }
         private List<string> ListenForChanges(string tableName)
         {
             
@@ -131,10 +199,11 @@ namespace mssql_listener
             if (pks.Count == 0)
             {
                 Console.WriteLine(tableName+" does not have a primaryKey - "+ string.Join(",", pks));
-                return [];
+                //return [];
             }
             using (SqlCommand command = new SqlCommand($"SELECT {String.Join(",", pks)} FROM dbo." + tableName, connection))
             {
+                Console.WriteLine($"SELECT {String.Join(",", pks)} FROM dbo." + tableName);
                 command.CommandType = CommandType.Text;
                 // 创建一个SqlDependency并绑定OnChange事件
                 SqlDependency dependency = new SqlDependency(command);
@@ -232,57 +301,65 @@ namespace mssql_listener
             lastSyncVersion = lastSyncVersion == -1 ? 0 : lastSyncVersion;
             if (lastSyncVersion < currentVersion)
             {
-                string query = $@"SELECT CT.* FROM CHANGETABLE(CHANGES dbo.{tableName}, {lastSyncVersion}) AS CT ORDER BY SYS_CHANGE_VERSION;";
-
-                var command = new SqlCommand(query, connection);
-
-                using (var reader = command.ExecuteReader())
+                try
                 {
-                    if(reader.HasRows)
+                    string query = $@"SELECT CT.* FROM CHANGETABLE(CHANGES dbo.{tableName}, {lastSyncVersion}) AS CT ORDER BY SYS_CHANGE_VERSION;";
+
+                    var command = new SqlCommand(query, connection);
+
+                    using (var reader = command.ExecuteReader())
                     {
-                        var count = 0;
-                        List<Dictionary<string, string>> changedData = new List<Dictionary<string, string>>();
-                        while (reader.Read())
+                        if (reader.HasRows)
                         {
-                            if (pks.Count > 0)
+                            var count = 0;
+                            List<Dictionary<string, string>> changedData = new List<Dictionary<string, string>>();
+                            while (reader.Read())
                             {
-                                var changeType = reader["SYS_CHANGE_OPERATION"].ToString();
-                                var primaryKey = reader[pks[0]].ToString();
-                                var pkName = pks[0];
-                                Console.WriteLine($"{tableName} Change detected: {changeType} on PrimaryKey: {primaryKey} - {pkName}");
-                                changedData.Add(new Dictionary<string, string>() {
+                                if (pks.Count > 0)
+                                {
+                                    var changeType = reader["SYS_CHANGE_OPERATION"].ToString();
+                                    var primaryKey = reader[pks[0]].ToString();
+                                    var pkName = pks[0];
+                                    Console.WriteLine($"{tableName} Change detected: {changeType} on PrimaryKey: {primaryKey} - {pkName}");
+                                    changedData.Add(new Dictionary<string, string>() {
                                 {"changeType",changeType },
                                 {"primaryKey",primaryKey },
                                 {"pkName",pkName },
                                 {"version",reader["SYS_CHANGE_VERSION"].ToString() },
                             });
 
+                                }
+                                //Console.WriteLine(count);
+                                count++;
                             }
-                            //Console.WriteLine(count);
-                            count++;
-                        }
-                        reader.Close();
-                        var _count = 0;
-                        foreach (var data in changedData)
-                        {
-                            _count++;
-                            if (!String.IsNullOrEmpty(data["changeType"]) && !String.IsNullOrEmpty(data["primaryKey"]))
+                            reader.Close();
+                            var _count = 0;
+                            foreach (var data in changedData)
                             {
-                                applyChanges(data["changeType"], tableName, data["pkName"], data["primaryKey"], data["version"], _count == changedData.Count);
+                                _count++;
+                                if (!String.IsNullOrEmpty(data["changeType"]) && !String.IsNullOrEmpty(data["primaryKey"]))
+                                {
+                                    applyChanges(data["changeType"], tableName, data["pkName"], data["primaryKey"], data["version"], _count == changedData.Count);
+                                }
                             }
                         }
-                    }
-                    else
-                    {
-                        if(isInit)
+                        else
                         {
-                            Console.WriteLine("This is no changes in "+ tableName+", set the last change version to "+ currentVersion);
-                            updateLastVersion(tableName, currentVersion.ToString());
+                            if (isInit)
+                            {
+                                Console.WriteLine("This is no changes in " + tableName + ", set the last change version to " + currentVersion);
+                                updateLastVersion(tableName, currentVersion.ToString());
+                            }
                         }
+
+
                     }
-                    
-                        
                 }
+                catch (Exception e)
+                {
+                    Console.WriteLine( "syncChanged " + e.Message);
+                }
+                
             }
         }
         private void applyChanges(string changeType, string tableName, string pkName, string primaryKey,string version,bool isLast)
@@ -359,7 +436,7 @@ namespace mssql_listener
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("applyChanges: "+ex.Message);
+                    Console.WriteLine("applyChanges: "+ex.Message+", "+ query);
                     //Console.WriteLine(query);
                 }
             }
@@ -401,6 +478,7 @@ namespace mssql_listener
 
                     using (SqlBulkCopy bulkCopy = new SqlBulkCopy(target_connection))
                     {
+                        bulkCopy.BulkCopyTimeout = 0;
                         bulkCopy.DestinationTableName = tableName;
 
                         try
@@ -437,7 +515,8 @@ namespace mssql_listener
                     object charMaxLength = reader["CHARACTER_MAXIMUM_LENGTH"];
 
                     //dataType = dataType == "text" && charMaxLength.ToString() == "2147483647" ? "VARCHAR" : dataType;
-                    charMaxLength = charMaxLength.ToString() == "2147483647" ? DBNull.Value : charMaxLength;
+                    charMaxLength = charMaxLength.ToString() == "2147483647" || dataType == "ntext" ? DBNull.Value : charMaxLength;
+                    charMaxLength = charMaxLength.ToString() == "-1" ? "max" : charMaxLength;
 
                     string maxLengthStr = charMaxLength != DBNull.Value ? "(" + charMaxLength + ")" : "";
                     createTableSql.Append($"{columnName} {dataType}{maxLengthStr}, ");
@@ -454,8 +533,8 @@ namespace mssql_listener
                 }
                 if (pks.Count == 0 && pkMatcher.ContainsKey(tableName))
                 {
-                    pks.Add(pkMatcher[tableName]);
-                    setPrimaryKey(tableName, pkMatcher[tableName]);
+                    pks.AddRange(pkMatcher[tableName]);
+                    setPrimaryKey(tableName, pkMatcher[tableName][0]);
                 }
                 tableConstructors[tableName]["data"] = new Dictionary<string, object> { { "pks", pks } };
             }
